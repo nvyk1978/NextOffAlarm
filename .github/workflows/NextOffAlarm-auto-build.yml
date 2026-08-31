@@ -1,0 +1,68 @@
+name: Build Next Off Alarm APK
+
+on:
+  push:
+    paths:
+      - 'source.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract source.zip
+        run: |
+          set -euxo pipefail
+          rm -rf build-src
+          mkdir build-src
+          unzip -q source.zip -d build-src
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build APK
+        working-directory: build-src
+        run: gradle --no-daemon --no-build-cache clean assembleDebug
+
+      - name: Read version
+        id: version
+        working-directory: build-src
+        run: |
+          VERSION=$(sed -n "s/.*versionName[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" app/build.gradle | head -n1)
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Collect APK
+        run: |
+          APK=$(find build-src/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n1)
+          test -n "$APK"
+          cp "$APK" "NextOffAlarm-v${{ steps.version.outputs.version }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NextOffAlarm-v${{ steps.version.outputs.version }}
+          path: NextOffAlarm-v${{ steps.version.outputs.version }}.apk
+          if-no-files-found: error
